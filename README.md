@@ -1,0 +1,1 @@
+# SSI Shopping server with FastAPI
