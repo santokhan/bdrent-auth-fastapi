@@ -103,7 +103,7 @@ async def logout(authorization: str = Header(None)) -> dict:
 
 
 @router.post("/forgot")
-async def forgot(user: ForgotModel):
+async def forgot(referer: str = Header(default=None), user: ForgotModel = None):
     try:
         user.validate_phone_number()
 
@@ -119,16 +119,16 @@ async def forgot(user: ForgotModel):
 
         reset_token = create_access_token(user_data)
 
-        # print(f"http://127.0.0.1:3005/api/v1/users/reset?token={reset_token}")
+        params = {"token": reset_token, "redirect": referer}
+        query_string = "&".join(f"{key}={value}" for key, value in params.items())
 
         if user.callback:
-            return RedirectResponse(
-                url=f"{user.callback}?token={reset_token}", status_code=307
-            )
+            url = f"{user.callback}?{query_string}"
+            return RedirectResponse(url=url, status_code=307)
         else:
-            return RedirectResponse(
-                url=f"/api/v1/users/reset?token={reset_token}", status_code=307
-            )
+            url = f"/api/v1/users/reset?{query_string}"
+            # print(url)
+            return RedirectResponse(url=url, status_code=307)
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
