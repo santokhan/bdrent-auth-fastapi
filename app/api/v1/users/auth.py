@@ -21,12 +21,15 @@ users_collection = db["users"]
 async def register(user: UserModel) -> dict:
     try:
         user.validate_phone_number()
-
         user.validate_password()
 
-        existing_user = await users_collection.find_one(
-            {"$or": [{"email": user.email}, {"phone": user.phone}]}
-        )
+        filter = {}
+        if user.email:
+            filter["email"] = user.email
+        if user.phone:
+            filter["phone"] = user.phone
+
+        existing_user = await users_collection.find_one(filter)
         if existing_user:
             raise HTTPException(status_code=400, detail="User already exists")
 
@@ -50,7 +53,11 @@ async def login(user: UserModel) -> TokenResponse:
     if not user.email and not user.phone:
         raise HTTPException(status_code=400, detail="Email or phone must be provided")
     try:
-        filter = {"$or": [{"email": user.email}, {"phone": user.phone}]}
+        filter = {}
+        if user.email:
+            filter["email"] = user.email
+        if user.phone:
+            filter["phone"] = user.phone
         db_user = await users_collection.find_one(filter)
 
         verify_hash(hash=db_user["password"], user_password=user.password)
@@ -107,9 +114,13 @@ async def forgot(referer: str = Header(default=None), user: ForgotModel = None):
     try:
         user.validate_phone_number()
 
-        db_user = await users_collection.find_one(
-            {"$or": [{"email": user.email}, {"phone": user.phone}]}
-        )
+        filter = {}
+        if user.email:
+            filter["email"] = user.email
+        if user.phone:
+            filter["phone"] = user.phone
+
+        db_user = await users_collection.find_one(filter)
 
         # Set to token
         user_data = {}
