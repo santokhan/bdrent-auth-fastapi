@@ -75,6 +75,7 @@ def forgot(data: dict):
 creadentials = {"phone": "01307230077", "password": "santo@1234"}
 creadentials = {"email": "inbox.santo@hotmail.com", "password": "santo@1234"}
 forgot_creadentials = {"email": "inbox.santo@hotmail.com"}
+reset_creadentials = {"email": "inbox.santo@hotmail.com", "password": "santo@1234"}
 
 # signup(creadentials)
 # user = signin(creadentials)

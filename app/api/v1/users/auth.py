@@ -1,5 +1,5 @@
-from fastapi import HTTPException, APIRouter, Header
-from fastapi.responses import RedirectResponse
+from fastapi import HTTPException, APIRouter, Header, Path, Query
+from fastapi.responses import HTMLResponse, RedirectResponse
 from app.config import db
 from .helper.bearer import get_bearer_token
 from .helper.hash import verify_hash, make_hash
@@ -103,7 +103,7 @@ async def logout(authorization: str = Header(None)) -> dict:
 
 
 @router.post("/forgot")
-async def register(user: ForgotModel):
+async def forgot(user: ForgotModel):
     try:
         user.validate_phone_number()
 
@@ -119,18 +119,27 @@ async def register(user: ForgotModel):
 
         reset_token = create_access_token(user_data)
 
+        # print(f"http://127.0.0.1:3005/api/v1/users/reset?token={reset_token}")
+
         if user.callback:
-            return RedirectResponse(url=f"{user.callback}?token={reset_token}")
+            return RedirectResponse(
+                url=f"{user.callback}?token={reset_token}", status_code=307
+            )
         else:
-            return RedirectResponse(url=f"/reset?token={reset_token}")
+            return RedirectResponse(
+                url=f"/api/v1/users/reset?token={reset_token}", status_code=307
+            )
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.get("/reset")
-async def reset_form():
-    return {"message": "Welcome to reset form"}
+@router.get("/reset", response_class=HTMLResponse)
+async def reset_form(token: str = Query(...)):
+    with open("static/reset.html", "r", encoding="utf-8") as file:
+        html_content = file.read()
+        if html_content:
+            return html_content
 
 
 @router.post("/reset")

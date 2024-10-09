@@ -1,8 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-# from app.api.v1.users import auth
-import os
+from fastapi.staticfiles import StaticFiles
 from app.api.v1 import root
 from app.api.v1.users import auth
 
@@ -11,6 +9,8 @@ def create_app():
     app = FastAPI(
         title="Authentication",
     )
+
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
     app.add_middleware(
         CORSMiddleware,
