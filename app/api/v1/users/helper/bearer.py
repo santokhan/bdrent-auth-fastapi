@@ -1,9 +1,11 @@
-from fastapi import HTTPException, Header
+from fastapi import HTTPException, status
 
 
-def get_bearer_token(authorization: str = Header(None)) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
+def get_bearer_token(authorization: str) -> str:
+    if not authorization.startswith("Bearer "):
         raise HTTPException(
-            status_code=401, detail="Invalid authentication credentials"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     return authorization.split(" ")[1]
