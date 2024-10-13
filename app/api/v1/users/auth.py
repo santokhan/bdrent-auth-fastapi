@@ -64,7 +64,9 @@ async def login(user: UserModel) -> TokenResponse:
         if user.phone:
             filter["phone"] = user.phone
         db_user = await users_collection.find_one(filter)
-
+        if db_user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        
         verify_hash(hash=db_user["password"], user_password=user.password)
 
         # Set to token
