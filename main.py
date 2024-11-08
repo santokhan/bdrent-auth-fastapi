@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.api.v1 import root
 from app.api.v1.users import auth
+from app.utils.cors import allow_origins
 
 
 def create_app():
@@ -14,14 +15,7 @@ def create_app():
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "*",
-            "http://localhost:5174",
-            "http://localhost:5173",
-            "http://localhost:3000",
-            "https://ssi-admin.netlify.app",
-            "https://ssi-admin-v2.netlify.app",
-        ],
+        allow_origins=allow_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

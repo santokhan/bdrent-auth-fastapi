@@ -1,7 +1,8 @@
+from datetime import datetime
 import re
 from phonenumbers import is_valid_number, parse
-from pydantic import BaseModel, EmailStr, Field
-from typing import Optional
+from pydantic import BaseModel, EmailStr, Field, model_validator
+from typing import List, Optional
 
 
 class UserModel(BaseModel):
@@ -41,6 +42,31 @@ class UserModel(BaseModel):
                 raise ValueError("Invalid password: " + " ".join(errors))
 
         return "Valid password"
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    verified: Optional[bool] = False
+    created_at: datetime
+    updated_at: datetime
+
+    # Model validator to check that at least one of email or phone is provided
+    @model_validator(mode="before")
+    def check_email_or_phone(cls, values):
+        email = values.get("email")
+        phone = values.get("phone")
+
+        if not email and not phone:
+            raise ValueError('At least one of "email" or "phone" must be provided.')
+
+        return values
+
+
+class UsersResponse(BaseModel):
+    list: List[UserResponse] = Field(default_factory=list)
+    count: int = Field(default_factory=int)
 
 
 class ForgotModel(BaseModel):
