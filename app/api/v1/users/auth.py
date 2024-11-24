@@ -115,7 +115,7 @@ async def token(token: TokenInputModel) -> AccessTokenResponse:
     return {"access_token": refresh_access_token(token.refresh_token)}
 
 
-@router.post("/logout")
+@router.post("/signout")
 async def logout(header: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
     access_token = get_bearer_token(header.credentials)
 
