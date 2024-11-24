@@ -22,8 +22,8 @@ def create_app():
     )
     app.include_router(root.router)
     app.include_router(
-        tags=["users"],
-        prefix="/api/v1/users",
+        tags=["auth"],
+        prefix="/api/v1/auth",
         router=auth.router,
     )
 

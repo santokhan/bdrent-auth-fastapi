@@ -28,7 +28,7 @@ router = APIRouter()
 collection = db["users"]
 
 
-@router.post("/register")
+@router.post("/signup")
 async def register(user: UserModel) -> dict:
     try:
         print(user)
@@ -65,7 +65,7 @@ async def register(user: UserModel) -> dict:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/login")
+@router.post("/signin")
 async def login(user: UserModel) -> TokenResponse:
     if not user.email and not user.phone:
         raise HTTPException(status_code=400, detail="Email or phone must be provided")
