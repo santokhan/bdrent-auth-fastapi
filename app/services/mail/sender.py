@@ -6,14 +6,14 @@ from app.services.mail.config import SMTP_SERVER, SMTP_PORT, SMTP_USER, SMTP_PAS
 
 
 async def send_email(to_email: str, reset_link: str):
-    msg = MIMEMultipart()
+    msg = MIMEMultipart("alternative")
     msg["From"] = SMTP_USER
     msg["To"] = to_email
     msg["Subject"] = "Password Reset Request"
 
     body = template.html_content(reset_link)
 
-    msg.attach(MIMEText(body, "plain"))
+    msg.attach(MIMEText(body, "html"))
 
     try:
         with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
