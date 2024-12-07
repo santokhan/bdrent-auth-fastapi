@@ -63,6 +63,8 @@ async def register(user: UserModel) -> dict:
             {
                 "email": user.email,
                 "phone": user.phone,
+                "username": user.username,
+                "name": user.name,
                 "password": make_hash(user.password),
                 "verified": False,
                 "created_at": datetime.now(),

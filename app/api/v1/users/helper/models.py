@@ -6,6 +6,8 @@ from typing import List, Optional
 
 
 class UserModel(BaseModel):
+    username: Optional[str] = None
+    name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = Field(
         default=None, min_length=11, max_length=11
@@ -46,6 +48,8 @@ class UserModel(BaseModel):
 
 class UserResponse(BaseModel):
     id: str
+    username: Optional[str] = None
+    name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
     verified: Optional[bool] = False
@@ -70,13 +74,14 @@ class UsersResponse(BaseModel):
 
 
 class ForgotModel(BaseModel):
-    email: Optional[EmailStr] = None
-    username: Optional[str] = None
-    email: Optional[str] = None
+    email: Optional[EmailStr] = Field(defaut=None)
+    username: Optional[str] = Field(defaut=None)
     phone: Optional[str] = Field(
         default=None, min_length=11, max_length=11
     )  # Store as a string for initial input
-    callback: Optional[str] = None
+    callback: Optional[str] = Field(
+        default=None, detail="Reset form URL that client will send in body."
+    )
 
     def validate_phone_number(self):
         if self.phone:  # validate only if user inputed
@@ -92,12 +97,8 @@ class ForgotModel(BaseModel):
 
 
 class ResetModel(BaseModel):
-    email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(
-        default=None, min_length=11, max_length=11
-    )  # Store as a string for initial input
-    password: str
-    token: str
+    password: str = Field(default=None)
+    token: str = Field(default=None, description="Token including user object.")
 
     def validate_phone_number(self):
         if self.phone:  # validate only if user inputed
