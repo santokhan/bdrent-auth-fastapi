@@ -95,10 +95,13 @@ async def login(user: UserModel) -> TokenResponse:
         verify_hash(hash=db_user["password"], user_password=user.password)
 
         # Set to token
-        user_data = {}
-        for key in ["email", "phone"]:
-            if db_user.get(key):
-                user_data[key] = db_user.get(key)
+        user_data = {
+            "id": str(db_user.get("_id", None)),
+            "name": db_user.get("name", None),
+            "email": db_user.get("email", None),
+            "phone": db_user.get("phone", None),
+            "username": db_user.get("username", None),
+        }
 
         # Store to databaes that help on logout
         refresh_token = create_refresh_token(user_data)
