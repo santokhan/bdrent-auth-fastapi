@@ -71,6 +71,8 @@ class UsersResponse(BaseModel):
 
 class ForgotModel(BaseModel):
     email: Optional[EmailStr] = None
+    username: Optional[str] = None
+    email: Optional[str] = None
     phone: Optional[str] = Field(
         default=None, min_length=11, max_length=11
     )  # Store as a string for initial input
