@@ -1,6 +1,15 @@
 from datetime import datetime
 from bson import ObjectId
-from fastapi import Depends, HTTPException, APIRouter, Header, Query, Request, status
+from fastapi import (
+    Body,
+    Depends,
+    HTTPException,
+    APIRouter,
+    Header,
+    Query,
+    Request,
+    status,
+)
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.api.v1 import sms
@@ -24,6 +33,7 @@ from .helper.token import (
     decode,
     refresh_access_token,
 )
+from app.api.v1.users.helper.token import decode
 
 router = APIRouter()
 
@@ -138,7 +148,7 @@ async def logout(header: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
 
 @router.post("/forgot")
 async def forgot(
-    request: Request, referer: str = Header(default=None), user: ForgotModel = None
+    request: Request, referer: str = Header(default=None), user: ForgotModel = Body(...)
 ):
     try:
         user.validate_phone_number()
@@ -146,43 +156,45 @@ async def forgot(
         filter = {}
         if user.email:
             filter["email"] = user.email
-        if user.phone:
+        elif user.phone:
             filter["phone"] = user.phone
+        elif user.username:
+            filter["username"] = user.username
 
         db_user = await collection.find_one(filter)
 
         if db_user is None:
             raise HTTPException(
-                status_code=status.HTTP_204_NO_CONTENT,
-                detail="Not user found with the given email",
+                status_code=204, detail="Not user found with the given email"
             )
-        # Set to token
-        user_data = {}
-        for key in ["email", "phone"]:
-            if user_data.get(key):
-                db_user[key] = user_data.get(key)
 
-        reset_token = create_access_token(user_data)
+        id = str(db_user.get("_id", None))
+
+        if id is None:
+            raise HTTPException(
+                status_code=200, detail="To create token user id is required."
+            )
+
+        reset_token = create_access_token({"id": id})
 
         full_url = f"{request.url.scheme}://{request.url.netloc}"
         params = {"token": reset_token, "redirect": referer}
         query_string = "&".join(f"{key}={value}" for key, value in params.items())
 
-        if user.callback:
-            url = f"{user.callback}?{query_string}"
+        url_with_token = ""
+        if user.callback is not None:
+            url_with_token = f"{user.callback}?{query_string}"
         else:
-            url = f"{full_url}/api/v1/users/reset?{query_string}"
-            # print(url)
-            # return RedirectResponse(url=url, status_code=307)
-            
+            url_with_token = f"{full_url}/api/v1/users/reset?{query_string}"
+
         # Send reset link via SMS or Email
         if filter.get("phone"):
             await sms.sms_sender(
-                message=f"SSI Mart \nTo reset your password, click the link: {full_url}",
+                message=f"SSI Mart \nTo reset your password, click the link: {url_with_token}",
                 mobile_no=filter.get("phone"),
             )
         elif filter.get("email"):
-            await send_email(reset_link=full_url, to_email=filter.get("email"))
+            await send_email(reset_link=url_with_token, to_email=filter.get("email"))
 
         return {"message": "Password reset link has been sent.", "to": user}
 
@@ -199,13 +211,24 @@ async def reset_form(token: str = Query(...)):
 
 
 @router.post("/reset")
-async def reset(reset: ResetModel):
+async def reset(reset_model: ResetModel):
     try:
-        filter = {"$or": [{"email": reset.email}, {"phone": reset.phone}]}
+        if reset_model.token is None or reset_model.password is None:
+            raise HTTPException(
+                status_code=400, detail="Token and Password are required."
+            )
 
-        updated = await collection.update_one(
-            filter, {"$set": {"password": make_hash(reset.password)}}
-        )
+        decoded_user = decode(reset_model.token)
+
+        id = decoded_user.get("id", None)
+
+        filter = {}
+        if id is not None:
+            filter["_id"] = ObjectId(id)
+
+        password = make_hash(reset_model.password)
+
+        updated = await collection.update_one(filter, {"$set": {"password": password}})
 
         if updated is None:
             raise HTTPException(
