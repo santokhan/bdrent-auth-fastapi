@@ -3,7 +3,9 @@ from bson import ObjectId
 from fastapi import Depends, HTTPException, APIRouter, Header, Query, Request, status
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from app.api.v1 import sms
 from app.config import db
+from app.services.mail.sender import send_email
 from .helper.bearer import get_bearer_token
 from .helper.hash import verify_hash, make_hash
 from .helper.schemas import AccessTokenResponse, TokenResponse
@@ -31,7 +33,6 @@ collection = db["users"]
 @router.post("/signup")
 async def register(user: UserModel) -> dict:
     try:
-        print(user)
         user.validate_phone_number()
         user.validate_password()
 
@@ -73,9 +74,11 @@ async def login(user: UserModel) -> TokenResponse:
         filter = {}
         if user.email:
             filter["email"] = user.email
-        if user.phone:
+        elif user.phone:
             filter["phone"] = user.phone
+
         db_user = await collection.find_one(filter)
+
         if db_user is None:
             raise HTTPException(status_code=404, detail="User not found")
 
@@ -171,8 +174,17 @@ async def forgot(
             url = f"{full_url}/api/v1/users/reset?{query_string}"
             # print(url)
             # return RedirectResponse(url=url, status_code=307)
+            
+        # Send reset link via SMS or Email
+        if filter.get("phone"):
+            await sms.sms_sender(
+                message=f"SSI Mart \nTo reset your password, click the link: {full_url}",
+                mobile_no=filter.get("phone"),
+            )
+        elif filter.get("email"):
+            await send_email(reset_link=full_url, to_email=filter.get("email"))
 
-        return {"token": reset_token}
+        return {"message": "Password reset link has been sent.", "to": user}
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
