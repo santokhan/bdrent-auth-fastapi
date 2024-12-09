@@ -115,3 +115,7 @@ class ResetModel(BaseModel):
 
 class TokenInputModel(BaseModel):
     refresh_token: str
+
+
+class VerificationModel(BaseModel):
+    callback_url: str = Field(description="Callback URL sent from client or app.")

@@ -1,4 +1,5 @@
 from datetime import datetime
+from shutil import ExecError
 from bson import ObjectId
 from fastapi import (
     Body,
@@ -10,11 +11,11 @@ from fastapi import (
     Request,
     status,
 )
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.api.v1 import sms
 from app.config import db
-from app.services.mail.sender import send_email
+from app.services.mail.sender import send_email, send_email_verification
 from .helper.bearer import get_bearer_token
 from .helper.hash import verify_hash, make_hash
 from .helper.schemas import AccessTokenResponse, TokenResponse
@@ -25,6 +26,7 @@ from .helper.models import (
     TokenInputModel,
     UserResponse,
     UsersResponse,
+    VerificationModel,
 )
 from pymongo.errors import PyMongoError
 from .helper.token import (
@@ -103,6 +105,7 @@ async def login(user: UserModel) -> TokenResponse:
             "email": db_user.get("email", None),
             "phone": db_user.get("phone", None),
             "username": db_user.get("username", None),
+            "verified": db_user.get("verified", None),
         }
 
         # Store to databaes that help on logout
@@ -110,7 +113,7 @@ async def login(user: UserModel) -> TokenResponse:
         await collection.update_one(filter, {"$set": {"refresh_token": refresh_token}})
 
         access_token = create_access_token(user_data)
-        print(user_data)
+
         return TokenResponse(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -124,13 +127,28 @@ async def login(user: UserModel) -> TokenResponse:
 
 @router.post("/token")
 async def token(token: TokenInputModel) -> AccessTokenResponse:
-    doc = await collection.find_one({"refresh_token": token.refresh_token})
-    if doc is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
-        )
+    decode(token.refresh_token)
 
-    return {"access_token": refresh_access_token(token.refresh_token)}
+    try:
+        user = await collection.find_one({"refresh_token": token.refresh_token})
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+            )
+
+        user_data = {
+            "id": str(user.get("_id", None)),
+            "name": user.get("name", None),
+            "email": user.get("email", None),
+            "phone": user.get("phone", None),
+            "username": user.get("username", None),
+            "verified": user.get("verified", None),
+        }
+
+        return {"access_token": create_access_token(user_data)}
+
+    except ExecError as e:
+        raise HTTPException(status_code=400, detail="Invalid request")
 
 
 @router.post("/signout")
@@ -138,8 +156,6 @@ async def logout(header: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
     access_token = get_bearer_token(header.credentials)
 
     user_data = decode(access_token)
-
-    print(user_data)
 
     filter = {}
     for key in ["email", "phone"]:
@@ -241,6 +257,63 @@ async def reset(reset_model: ResetModel):
             )
 
         return {"message": "Password reset successful."}
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/verify")
+async def get_verification_email(
+    request: Request,
+    header: HTTPAuthorizationCredentials = Depends(HTTPBearer()),
+    verification_model: VerificationModel = Body(),
+):
+    callback_url = verification_model.callback_url
+    user = decode(header.credentials)
+
+    try:
+        user_id = user.get("id")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="User ID not found in token.")
+
+        db_user = await collection.find_one({"_id": ObjectId(user_id)})
+        if not db_user:
+            raise HTTPException(status_code=404, detail="No user found.")
+
+        verification_token = create_access_token({"id": user_id})
+
+        query_string = f"token={verification_token}&redirect={callback_url}"
+
+        url_with_token = f"{request.url._url}?{query_string}"
+
+        await send_email_verification(
+            verification_link=url_with_token, to_email=db_user["email"]
+        )
+
+        return {"message": "Password reset link has been sent."}
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
+
+
+@router.get("/verify")
+async def verify(token: str = Query(...), redirect: str = Query(...)):
+    try:
+        user = decode(token)
+
+        user_id = user.get("id")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="User ID not found in token.")
+
+        filter = {"_id": ObjectId(user_id)}
+
+        updated = await collection.update_one(filter, {"$set": {"verified": True}})
+        if updated.modified_count == 0:
+            raise HTTPException(
+                status_code=404, detail="User not found or already verified."
+            )
+
+        return RedirectResponse(url=redirect)
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
