@@ -15,9 +15,24 @@ services:
     build: .
     container_name: python_container
     depends_on:
+      - redis
       - mongodb
     volumes:
       - .:/app
     working_dir: /app # Corrected from 'working_file' to 'working_dir'
     ports:
       - "8002:8000"
+    networks:
+      - app_network
+
+  redis:
+    image: "redis:latest"  # Official Redis image
+    container_name: "redis"
+    ports:
+      - "6379:6379"  # Expose Redis port
+    networks:
+      - app_network  # Custom network for your app and Redis to communicate
+
+networks:
+  app_network:
+    driver: bridge

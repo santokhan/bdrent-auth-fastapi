@@ -28,3 +28,5 @@ mongodb(){
     use test # create and switch to db like git bash
     db.createCollection("auth") # require at least one collection
 }
+
+docker exec -it python_container python app/api/v1/otp_store.py

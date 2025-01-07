@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.api.v1 import root
 from app.api.v1.users import auth
+from app.api.v1 import otp
 from app.utils.cors import allow_origins
 
 
@@ -25,6 +26,11 @@ def create_app():
         tags=["auth"],
         prefix="/api/v1/auth",
         router=auth.router,
+    )
+    app.include_router(
+        tags=["otp"],
+        prefix="/api/v1/otp",
+        router=otp.router,
     )
 
     return app
