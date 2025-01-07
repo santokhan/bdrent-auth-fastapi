@@ -23,9 +23,8 @@ class OTPRequest(BaseModel):
         return values
 
 
-class OTPVerify(BaseModel):
-    phone_number: str
-    otp: str
+class OTPVerify(OTPRequest):
+    otp: str = Field(min_length=6, max_length=6)
 
 
 otp_store = OTPStore()
@@ -46,7 +45,7 @@ async def verify_otp(request: OTPVerify):
     otp = request.otp
 
     # Check if OTP exists for the given phone number asynchronously
-    stored_otp = await asyncio.to_thread(lambda: otp_store.get(phone_number))
+    stored_otp = await asyncio.to_thread(lambda: otp_store.read(phone_number))
 
     if not stored_otp:
         raise HTTPException(status_code=400, detail="OTP not found")
