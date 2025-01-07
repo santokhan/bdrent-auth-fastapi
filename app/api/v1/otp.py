@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel, Field, model_validator
-import time
+from sms_service.main import SMSRequest, send_sms
 from .otp_store import OTPStore
 import asyncio  # Use asyncio for async operations
 
 router = APIRouter()
+otp_store = OTPStore()
 
 
 class OTPRequest(BaseModel):
@@ -27,22 +28,38 @@ class OTPVerify(OTPRequest):
     otp: str = Field(min_length=6, max_length=6)
 
 
-otp_store = OTPStore()
+class OTPResponse(BaseModel):
+    message: str
 
 
-# Generate OTP
 @router.post("/generate-otp/")
-async def generate_otp(request: OTPRequest = Body(...)):
+async def generate_otp(request: OTPRequest = Body(...)) -> OTPResponse:
     # Simulate asynchronous OTP creation
-    await asyncio.to_thread(otp_store.create, request.phone_number)
-    return {"message": "OTP sent successfully"}
+    otp = await asyncio.to_thread(otp_store.create, request.phone_number)
+
+    if otp is None:
+        raise HTTPException(detail="Failed to generate OTP.")
+
+    sms_status = await send_sms(
+        SMSRequest(
+            mobile_no=request.phone_number,
+            message=f"Your verification code is: {otp}.",
+        )
+    )
+
+    if sms_status is None:
+        raise HTTPException(detail="Failed to send OTP.")
+
+    return OTPResponse(message="OTP sent successfully")
 
 
-# Verify OTP
+# # Test
+# {"phone_number": "01307230077"}
+
+
 @router.post("/verify-otp/")
-async def verify_otp(request: OTPVerify):
+async def verify_otp(request: OTPVerify = Body(...)) -> OTPResponse:
     phone_number = request.phone_number
-    otp = request.otp
 
     # Check if OTP exists for the given phone number asynchronously
     stored_otp = await asyncio.to_thread(lambda: otp_store.read(phone_number))
@@ -50,22 +67,19 @@ async def verify_otp(request: OTPVerify):
     if not stored_otp:
         raise HTTPException(status_code=400, detail="OTP not found")
 
-    if stored_otp["otp"] != otp:
+    if otp_store.verify(phone_number=phone_number, otp_input=request.otp) == False:
         raise HTTPException(status_code=400, detail="Invalid OTP")
 
     # Check if the OTP is expired asynchronously
-    if time.time() - stored_otp["timestamp"] > 300:
+    if otp_store.is_expired(phone_number):
         await asyncio.to_thread(lambda: otp_store.delete(phone_number))
         raise HTTPException(status_code=400, detail="OTP expired")
 
     # OTP is valid, clear OTP after verification
     await asyncio.to_thread(lambda: otp_store.delete(phone_number))
 
-    return {"message": "OTP verified successfully"}
+    return OTPResponse(message="OTP verified successfully")
 
 
-# Replace this function with your SMS sender script
-async def send_sms(phone_number, otp):
-    # Simulate async SMS sending
-    print(f"Sending OTP {otp} to {phone_number}")
-    # Your script logic here, ideally using an async SMS sending service
+# # Test
+# {"phone_number": "01307230077", "otp": ""}

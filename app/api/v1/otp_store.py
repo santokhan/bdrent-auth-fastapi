@@ -34,14 +34,18 @@ class OTPStore:
         data = self.client.hgetall(phone_number)
         return data if data else None
 
-    def delete(self, phone_number: str) -> bool:
+    def verify(self, phone_number: str, otp_input=str):
         """
-        Deletes the OTP associated with the given phone number from Redis.
+        Matches the input OTP with the stored OTP for the given phone number.
 
-        :param phone_number: The phone number to delete the OTP for.
-        :return: True if the OTP was deleted, False otherwise.
+        :param phone_number: The phone number to match the OTP for.
+        :param otp_input: The OTP input to verify.
+        :return: True if the OTPs match, False otherwise.
         """
-        return self.client.delete(phone_number) > 0
+        data = self.read(phone_number=phone_number)
+        otp_db = data.get("otp", None)
+
+        return otp_db == otp_input
 
     def is_expired(self, phone_number: str, expiry_time: int = 300) -> bool:
         """
@@ -57,6 +61,15 @@ class OTPStore:
 
         timestamp = float(data["timestamp"])
         return time.time() - timestamp > expiry_time
+
+    def delete(self, phone_number: str) -> bool:
+        """
+        Deletes the OTP associated with the given phone number from Redis.
+
+        :param phone_number: The phone number to delete the OTP for.
+        :return: True if the OTP was deleted, False otherwise.
+        """
+        return self.client.delete(phone_number) > 0
 
 
 if __name__ == "__main__":
