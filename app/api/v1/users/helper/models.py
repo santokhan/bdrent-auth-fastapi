@@ -6,10 +6,10 @@ from typing import List, Optional
 
 
 class UserModel(BaseModel):
-    username: Optional[str] = None
-    name: Optional[str] = None
+    username: str = None
+    name: str = None
     email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(
+    phone: str = Field(
         default=None, min_length=11, max_length=11
     )  # Store as a string for initial input
     password: str
@@ -50,8 +50,6 @@ class UserResponse(BaseModel):
     id: str
     username: Optional[str] = None
     name: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
     verified: Optional[bool] = False
     created_at: datetime
     updated_at: datetime
