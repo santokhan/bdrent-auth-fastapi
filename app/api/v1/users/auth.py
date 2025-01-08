@@ -1,4 +1,3 @@
-from datetime import datetime
 from shutil import ExecError
 from bson import ObjectId
 from fastapi import (
@@ -13,8 +12,11 @@ from fastapi import (
 )
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from requests import Session
 from app.api.v1 import sms
-from app.config import db
+from app.db import get_collection
+from app.models.users import User
+from app.schemas.users import UserBase
 from app.services.mail.sender import send_email, send_email_verification
 from .helper.bearer import get_bearer_token
 from .helper.hash import verify_hash, make_hash
@@ -22,6 +24,7 @@ from .helper.schemas import AccessTokenResponse, TokenResponse
 from .helper.models import (
     ForgotModel,
     ResetModel,
+    UserLogin,
     UserModel,
     TokenInputModel,
     UserResponse,
@@ -36,86 +39,93 @@ from .helper.token import (
     refresh_access_token,
 )
 from app.api.v1.users.helper.token import decode
+from pymongo.collection import Collection
+from app.db import get_db
+from app.crud.users import (
+    create_user,
+    read_user,
+    read_user_by_identifier,
+    read_users,
+    update_user,
+    delete_user,
+)
 
 router = APIRouter()
 
-collection = db["users"]
+
+async def user_collection() -> Collection:
+    collection = await get_collection("users")
+    return collection
 
 
 @router.post("/signup")
-async def register(user: UserModel) -> dict:
+async def register(
+    user: UserModel,
+    user_db: Session = Depends(get_db),
+) -> dict:
     try:
         user.validate_phone_number()
         user.validate_password()
 
-        filter = {}
-        if user.phone:
-            filter["phone"] = user.phone
-        if user.email:
-            filter["email"] = user.email
+        user_data = {
+            "role": user.role,
+            "email": user.email,
+            "phone": user.phone,
+            "username": user.username,
+            "name": user.name,
+            "password": make_hash(user.password),
+        }
 
-        existing_user = await collection.find_one(filter)
-        if existing_user:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="User already exists",
-            )
-
-        collection.insert_one(
-            {
-                "email": user.email,
-                "phone": user.phone,
-                "username": user.username,
-                "name": user.name,
-                "password": make_hash(user.password),
-                "verified": False,
-                "created_at": datetime.now(),
-                "updated_at": datetime.now(),
-            }
-        )
+        await create_user(user_db, user_data)
 
         return {"message": "User registered successfully"}
 
+    except HTTPException as http_err:
+        raise http_err
+
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=e)
+
+
+def trimmed_user(db_user: User):
+    return {
+        "id": db_user.id,
+        "role": db_user.role,
+        "username": db_user.username,
+        "name": db_user.name,
+        "verified": db_user.verified,
+        "created_at": str(db_user.created_at),
+        "updated_at": str(db_user.updated_at),
+    }
 
 
 @router.post("/signin")
-async def login(user: UserModel) -> TokenResponse:
-    if not user.email and not user.phone:
-        raise HTTPException(status_code=400, detail="Email or phone must be provided")
+async def login(
+    user: UserLogin,
+    user_db=Depends(get_db),
+) -> TokenResponse:
     try:
-        filter = {}
-        if user.email:
-            filter["email"] = user.email
-        elif user.phone:
-            filter["phone"] = user.phone
+        identifier = None
 
-        db_user = await collection.find_one(filter)
+        if user.username is not None:
+            identifier = user.username
+        elif user.phone is not None:
+            identifier = user.phone
+        elif user.email is not None:
+            identifier = user.email
 
-        if db_user is None:
-            raise HTTPException(status_code=404, detail="User not found")
+        db_user = await read_user_by_identifier(user_db, identifier)
 
-        verify_hash(hash=db_user["password"], user_password=user.password)
+        verify_hash(hash=db_user.password, user_password=user.password)
 
-        # Set to token
-        user_data = {
-            "id": str(db_user.get("_id", None)),
-            "name": db_user.get("name", None),
-            "email": db_user.get("email", None),
-            "phone": db_user.get("phone", None),
-            "username": db_user.get("username", None),
-            "verified": db_user.get("verified", None),
-        }
+        user_data = trimmed_user(db_user)
+        refresh_token = create_refresh_token(data=user_data)
+        print(user_data)
 
-        # Store to databaes that help on logout
-        refresh_token = create_refresh_token(user_data)
-        await collection.update_one(filter, {"$set": {"refresh_token": refresh_token}})
-
-        access_token = create_access_token(user_data)
+        await update_user(user_db, db_user.id, {"refresh_token": refresh_token})
 
         return TokenResponse(
-            access_token=access_token,
+            access_token=create_access_token(user_data),
             refresh_token=refresh_token,
             token_type="bearer",
             user=user_data,
@@ -126,33 +136,27 @@ async def login(user: UserModel) -> TokenResponse:
 
 
 @router.post("/token")
-async def token(token: TokenInputModel) -> AccessTokenResponse:
-    decode(token.refresh_token)
-
+async def token(
+    token: TokenInputModel,
+    user_db=Depends(get_db),
+) -> AccessTokenResponse:
+    decoded = decode(token.refresh_token)
     try:
-        user = await collection.find_one({"refresh_token": token.refresh_token})
-        if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
-            )
+        db_user = await read_user(user_db, decoded.get("id"))
 
-        user_data = {
-            "id": str(user.get("_id", None)),
-            "name": user.get("name", None),
-            "email": user.get("email", None),
-            "phone": user.get("phone", None),
-            "username": user.get("username", None),
-            "verified": user.get("verified", None),
-        }
+        user_data = trimmed_user(db_user)
 
         return {"access_token": create_access_token(user_data)}
 
     except ExecError as e:
-        raise HTTPException(status_code=400, detail="Invalid request")
+        raise HTTPException(status_code=400, detail=e.strerror)
 
 
 @router.post("/signout")
-async def logout(header: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
+async def logout(
+    header: HTTPAuthorizationCredentials = Depends(HTTPBearer()),
+    user_db=Depends(get_db),
+):
     access_token = get_bearer_token(header.credentials)
 
     user_data = decode(access_token)
@@ -162,14 +166,17 @@ async def logout(header: HTTPAuthorizationCredentials = Depends(HTTPBearer())):
         if user_data.get(key):
             filter[key] = user_data.get(key)
 
-    await collection.update_one(filter, {"$unset": {"refresh_token": ""}})
+    await update_user(user_db, user_data.get("id"), {"refresh_token": ""})
 
     return {"message": "User logged out successfully"}
 
 
 @router.post("/forgot")
 async def forgot(
-    request: Request, referer: str = Header(default=None), user: ForgotModel = Body(...)
+    request: Request,
+    referer: str = Header(default=None),
+    user: ForgotModel = Body(...),
+    user_db=Depends(get_db),
 ):
     try:
         user.validate_phone_number()
@@ -182,7 +189,7 @@ async def forgot(
         elif user.username:
             filter["username"] = user.username
 
-        db_user = await collection.find_one(filter)
+        db_user = await user_db.find_one(filter)
 
         if db_user is None:
             raise HTTPException(
@@ -232,11 +239,11 @@ async def reset_form(token: str = Query(...)):
 
 
 @router.post("/reset")
-async def reset(reset_model: ResetModel):
+async def reset(reset_model: ResetModel, user_db=Depends(get_db)):
     try:
         if reset_model.token is None or reset_model.password is None:
             raise HTTPException(
-                status_code=400, detail="Token and Password are required."
+                status_code=400, detail="Token and Password are required"
             )
 
         decoded_user = decode(reset_model.token)
@@ -249,12 +256,10 @@ async def reset(reset_model: ResetModel):
 
         password = make_hash(reset_model.password)
 
-        updated = await collection.update_one(filter, {"$set": {"password": password}})
+        updated = await user_db.update_one(filter, {"$set": {"password": password}})
 
         if updated is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Reset failed."
-            )
+            raise HTTPException(status_code=422, detail="Reset failed.")
 
         return {"message": "Password reset successful."}
 
@@ -267,6 +272,7 @@ async def get_verification_email(
     request: Request,
     header: HTTPAuthorizationCredentials = Depends(HTTPBearer()),
     verification_model: VerificationModel = Body(),
+    user_db=Depends(user_collection),
 ):
     callback_url = verification_model.callback_url
     user = decode(header.credentials)
@@ -276,7 +282,7 @@ async def get_verification_email(
         if not user_id:
             raise HTTPException(status_code=400, detail="User ID not found in token.")
 
-        db_user = await collection.find_one({"_id": ObjectId(user_id)})
+        db_user = await user_db.find_one({"_id": ObjectId(user_id)})
         if not db_user:
             raise HTTPException(status_code=404, detail="No user found.")
 
@@ -297,7 +303,11 @@ async def get_verification_email(
 
 
 @router.get("/verify")
-async def verify(token: str = Query(...), redirect: str = Query(...)):
+async def verify(
+    token: str = Query(...),
+    redirect: str = Query(...),
+    user_db=Depends(get_db),
+):
     try:
         user = decode(token)
 
@@ -307,7 +317,7 @@ async def verify(token: str = Query(...), redirect: str = Query(...)):
 
         filter = {"_id": ObjectId(user_id)}
 
-        updated = await collection.update_one(filter, {"$set": {"verified": True}})
+        updated = await user_db.update_one(filter, {"$set": {"verified": True}})
         if updated.modified_count == 0:
             raise HTTPException(
                 status_code=404, detail="User not found or already verified."
@@ -320,12 +330,15 @@ async def verify(token: str = Query(...), redirect: str = Query(...)):
 
 
 @router.get("/{id}", response_model=UserResponse)
-async def user(id: str):
+async def user(
+    id: str,
+    user_db=Depends(get_db),
+):
     if not ObjectId.is_valid(id):
         raise HTTPException(status_code=400, detail="Invalid 'id' provided")
 
     try:
-        doc = await collection.find_one({"_id": ObjectId(id)})
+        doc = await user_db.find_one({"_id": ObjectId(id)})
 
         if doc is None:
             raise HTTPException(status_code=404, detail=f"Item with id {id} not found")
@@ -348,51 +361,36 @@ VALID_SORT_FIELDS = ["created_at", "updated_at", "email", "name", "phone"]
 
 @router.get("", response_model=UsersResponse)
 async def users(
-    sort_by: str = "created_at", sort_order: int = -1, skip: int = 0, limit: int = 10
+    sort_by: str = "created_at",
+    sort_order: int = -1,
+    skip: int = 0,
+    limit: int = 10,
+    user_db=Depends(get_db),
 ):
     try:
-        # Validate the sort_by field
-        if sort_by not in VALID_SORT_FIELDS:
-            raise ValueError(f"Invalid sort field: {sort_by}")
+        users = await read_users(user_db)
 
-        # Validate the sort_order field
-        if sort_order not in [1, -1]:
-            raise ValueError("sort_order must be 1 (ascending) or -1 (descending)")
-
-        filters = {}
-
-        # Query the database with sorting, skipping, and limiting
-        users = (
-            await collection.find(filters)
-            .sort(sort_by, sort_order)
-            .skip(skip)
-            .limit(limit)
-            .to_list(length=None)
-        )
-        count = await collection.count_documents(filters)
-
-        # If no users are found, return an empty list
         if not users:
-            return {"users": []}
+            return {"users": [], "count": 0}
 
-        # Using list comprehension to build the filtered response
         filtered = []
 
         for user in users:
-            _id = user.get("_id", None)
-            if _id is not None:
-                filtered.append(
-                    UserResponse(
-                        id=str(_id),
-                        email=user.get("email", None),
-                        phone=user.get("phone", None),
-                        verified=user.get("verified", False),
-                        created_at=user.get("created_at"),
-                        updated_at=user.get("updated_at"),
-                    )
-                )
+            if user.id is None:
+                pass
 
-        return {"list": filtered, "count": count}
+            filtered.append(
+                UserResponse(
+                    id=user.id,
+                    name=user.name,
+                    username=user.username,
+                    verified=user.verified,
+                    created_at=user.created_at,
+                    updated_at=user.updated_at,
+                )
+            )
+
+        return {"list": filtered, "count": 0}
 
     except PyMongoError as e:
         raise HTTPException(
@@ -414,17 +412,12 @@ async def users(
 
 
 @router.delete("/{id}")
-async def delete(id: str):
-    if not ObjectId.is_valid(id):
-        raise HTTPException(status_code=400, detail="Invalid 'id' provided")
-
+async def delete(
+    id: str,
+    user_db=Depends(get_db),
+):
     try:
-        result = await collection.delete_one({"_id": ObjectId(id)})
-
-        # If no document was deleted, the id might not exist in the database
-        if result.deleted_count == 0:
-            raise HTTPException(status_code=404, detail=f"Item with id {id} not found")
-
+        await delete_user(user_db, id)
         return {"message": "User has been deleted.", "id": id}
 
     except Exception as e:

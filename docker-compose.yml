@@ -1,10 +1,10 @@
 version: '3.8'
 services:
   mongodb:
-    image: mongo:latest # Corrected image name from 'monngo' to 'mongo'
+    image: mongo:latest
     container_name: mongodb_container
     ports:
-      - "27018:27017" # External port remains 27018, but internal MongoDB port must be 27017
+      - "27018:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: 1234
@@ -19,19 +19,19 @@ services:
       - mongodb
     volumes:
       - .:/app
-    working_dir: /app # Corrected from 'working_file' to 'working_dir'
+    working_dir: /app
     ports:
       - "8002:8000"
     networks:
       - app_network
 
   redis:
-    image: "redis:latest"  # Official Redis image
+    image: "redis:latest"
     container_name: "redis"
     ports:
-      - "6379:6379"  # Expose Redis port
+      - "6379:6379"
     networks:
-      - app_network  # Custom network for your app and Redis to communicate
+      - app_network
 
 networks:
   app_network:

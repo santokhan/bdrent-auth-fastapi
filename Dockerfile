@@ -10,4 +10,9 @@ COPY . .
 
 EXPOSE 8000
 
+# RUN apt-get update && apt-get install -y git \
+#     && rm -rf /var/lib/apt/lists/*
+
+# RUN git --version
+
 CMD ["uvicorn", "main:app", "--reload", "--host", "0.0.0.0"]

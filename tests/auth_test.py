@@ -1,7 +1,8 @@
+import asyncio
 import requests
 import json
 
-API_URL = "http://127.0.0.1:3005/"
+API_URL = "http://localhost:8002/"
 
 
 def path_builder(endpoint: str):
@@ -23,7 +24,8 @@ def print_request_info(url, data):
 
 def signup(data: dict):
     try:
-        url = path_builder("users/register")
+        print("Start...")
+        url = path_builder("auth/signup")
         res = requests.post(url, json=data)
         data = res.json()
         print("users added")
@@ -72,12 +74,21 @@ def forgot(data: dict):
         print(identifier)
 
 
-creadentials = {"phone": "01307230077", "password": "santo@1234"}
-creadentials = {"email": "inbox.santo@hotmail.com", "password": "santo@1234"}
+creadentials = {
+    "phone": "01307230077",
+    "username": "santokhan",
+    "password": "santo@1234",
+}
 forgot_creadentials = {"email": "inbox.santo@hotmail.com"}
 reset_creadentials = {"email": "inbox.santo@hotmail.com", "password": "santo@1234"}
 
-# signup(creadentials)
-# user = signin(creadentials)
-# token(user)
-forgot(forgot_creadentials)
+
+async def test():
+    signup(creadentials)
+    # user = signin(creadentials)
+    # token(user)
+    # forgot(forgot_creadentials)
+
+
+if __name__ == "__main__":
+    asyncio.run(test())
