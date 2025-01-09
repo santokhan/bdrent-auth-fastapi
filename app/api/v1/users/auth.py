@@ -8,6 +8,7 @@ from fastapi import (
     Header,
     Query,
     Request,
+    Response,
     status,
 )
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -16,7 +17,6 @@ from requests import Session
 from app.api.v1 import sms
 from app.db import get_collection
 from app.models.users import User
-from app.schemas.users import UserBase
 from app.services.mail.sender import send_email, send_email_verification
 from .helper.bearer import get_bearer_token
 from .helper.hash import verify_hash, make_hash
@@ -101,8 +101,9 @@ def trimmed_user(db_user: User):
 
 @router.post("/signin")
 async def login(
-    user: UserLogin,
-    user_db=Depends(get_db),
+    user: UserLogin,  # non default
+    response: Response,  # non default
+    user_db=Depends(get_db),  # default
 ) -> TokenResponse:
     try:
         identifier = None
@@ -120,12 +121,33 @@ async def login(
 
         user_data = trimmed_user(db_user)
         refresh_token = create_refresh_token(data=user_data)
-        print(user_data)
 
         await update_user(user_db, db_user.id, {"refresh_token": refresh_token})
 
+        access_token = create_access_token(user_data)
+
+        # Set cookie to response for 1.domain and 2.user
+        response.set_cookie(
+            key="auth_token",
+            value=access_token,
+            domain=".bengalrent.xyz",  # Root domain
+            path="/",  # Accessible everywhere
+            secure=True,  # Only over HTTPS
+            httponly=True,  # Prevent JS access
+            samesite="None",  # Required for cross-subdomain
+        )
+        response.set_cookie(
+            key="user",
+            value=user_data,  # Public info
+            domain=".bengalrent.xyz",
+            path="/",
+            secure=True,
+            httponly=False,  # Allow JS access if necessary
+            samesite="None",
+        )
+
         return TokenResponse(
-            access_token=create_access_token(user_data),
+            access_token=access_token,
             refresh_token=refresh_token,
             token_type="bearer",
             user=user_data,
@@ -138,15 +160,38 @@ async def login(
 @router.post("/token")
 async def token(
     token: TokenInputModel,
-    user_db=Depends(get_db),
+    response: Response,  # non default
+    user_db=Depends(get_db), # default
 ) -> AccessTokenResponse:
     decoded = decode(token.refresh_token)
     try:
         db_user = await read_user(user_db, decoded.get("id"))
 
         user_data = trimmed_user(db_user)
+        
+        access_token = create_access_token(user_data)
 
-        return {"access_token": create_access_token(user_data)}
+        # Set cookie to response for 1.domain and 2.user
+        response.set_cookie(
+            key="auth_token",
+            value=access_token,
+            domain=".bengalrent.xyz",  # Root domain
+            path="/",  # Accessible everywhere
+            secure=True,  # Only over HTTPS
+            httponly=True,  # Prevent JS access
+            samesite="None",  # Required for cross-subdomain
+        )
+        response.set_cookie(
+            key="user",
+            value=user_data,  # Public info
+            domain=".bengalrent.xyz",
+            path="/",
+            secure=True,
+            httponly=False,  # Allow JS access if necessary
+            samesite="None",
+        )
+
+        return {"access_token": access_token}
 
     except ExecError as e:
         raise HTTPException(status_code=400, detail=e.strerror)
@@ -179,28 +224,20 @@ async def forgot(
     user_db=Depends(get_db),
 ):
     try:
-        user.validate_phone_number()
+        identifier = None
 
-        filter = {}
-        if user.email:
-            filter["email"] = user.email
-        elif user.phone:
-            filter["phone"] = user.phone
-        elif user.username:
-            filter["username"] = user.username
+        if user.username is not None:
+            identifier = user.username
+        elif user.phone is not None:
+            identifier = user.phone
+        elif user.email is not None:
+            identifier = user.email
 
-        db_user = await user_db.find_one(filter)
+        db_user = await read_user_by_identifier(user_db, identifier)
 
-        if db_user is None:
+        if db_user.id is None:
             raise HTTPException(
-                status_code=204, detail="Not user found with the given email"
-            )
-
-        id = str(db_user.get("_id", None))
-
-        if id is None:
-            raise HTTPException(
-                status_code=200, detail="To create token user id is required."
+                status_code=400, detail="To create token user id is required"
             )
 
         reset_token = create_access_token({"id": id})
@@ -216,13 +253,13 @@ async def forgot(
             url_with_token = f"{full_url}/api/v1/users/reset?{query_string}"
 
         # Send reset link via SMS or Email
-        if filter.get("phone"):
+        if user.phone is not None:
             await sms.sms_sender(
-                message=f"SSI Mart \nTo reset your password, click the link: {url_with_token}",
-                mobile_no=filter.get("phone"),
+                message=f"Bengal Rental \nTo reset your password, click the link: {url_with_token}",
+                mobile_no=user.phone,
             )
-        elif filter.get("email"):
-            await send_email(reset_link=url_with_token, to_email=filter.get("email"))
+        elif user.email:
+            await send_email(reset_link=url_with_token, to_email=user.email)
 
         return {"message": "Password reset link has been sent.", "to": user}
 
